@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AWSOME HUB</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#f3f5fa">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AWSOME HUB">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><img src="/icons/icon.svg" alt="" width="38" height="38"><h1>AWSOME HUB</h1></div>
+  <div class="tools">
+    <button id="btnTheme" class="iconbtn" type="button" aria-label="Change theme"></button>
+    <button id="btnGear" class="iconbtn" type="button" aria-label="Edit mode" aria-pressed="false"></button>
+  </div>
+</header>
+<main>
+  <p id="hint" class="hint" hidden>Edit mode is on. Drag cards to reorder them, or select + to add an app.</p>
+  <div id="grid"></div>
+  <p id="empty" class="hint" hidden>No apps yet. Select the gear, then + to add one.</p>
+</main>
+
+<dialog id="dlg">
+  <form id="frm">
+    <h2 id="dlgTitle"></h2>
+    <label>Title (optional)<input type="text" id="fTitle" maxlength="60" autocomplete="off"></label>
+    <label>Address or port
+      <input type="text" id="fTarget" required placeholder="20128 or https://google.com" autocapitalize="off" autocomplete="off" spellcheck="false">
+      <small>A number uses the same host as this hub.</small>
+    </label>
+    <label>Logo (image URL or emoji)
+      <input type="text" id="fIcon" placeholder="Leave empty to use the first letter" autocapitalize="off" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="row">
+      <div id="prev"></div>
+      <button type="button" class="btn" id="btnUpload">Upload image</button>
+      <input type="file" id="fFile" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/x-icon" hidden>
+    </div>
+    <label class="chk"><input type="checkbox" id="fFill"> Fill card with logo</label>
+    <label class="chk"><input type="checkbox" id="fTab"> Open in a new tab</label>
+    <div class="actions">
+      <button type="button" class="btn" id="btnCancel">Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
+<script src="/app.js"></script>
+</body>
+</html>
