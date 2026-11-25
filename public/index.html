@@ -35,6 +35,7 @@
       <select id="fType">
         <option value="link">Port or link</option>
         <option value="html">HTML page</option>
+        <option value="zip">ZIP static site</option>
       </select>
     </label>
     <div id="linkFields">
@@ -47,6 +48,25 @@
       <button type="button" class="btn" id="btnPageUpload">Upload HTML page</button>
       <input type="file" id="fPageFile" accept=".html,.htm,text/html" hidden>
       <small id="pageStatus">HTML pages are served here in an isolated sandbox.</small>
+    </div>
+    <div id="zipFields" hidden>
+      <button type="button" class="btn" id="btnZipUpload">Upload ZIP</button>
+      <input type="file" id="fZipFile" accept=".zip,application/zip" hidden>
+      <div class="zip-requirements">
+        <strong>Upload requirements</strong>
+        <ul>
+          <li>ZIP must contain <code>index.html</code> at the root or inside <code>public/</code>.</li>
+          <li><code>node_modules/</code> folders are skipped.</li>
+          <li>Maximum ZIP: 100 MB; extracted site: 150 MB; 1000 entries.</li>
+          <li>Each site uses its own port; that port must be reachable from your device.</li>
+        </ul>
+      </div>
+      <div id="zipUploadState" class="zip-upload-state" role="status" aria-live="polite" hidden>
+        <span class="zip-spinner" aria-hidden="true"></span>
+        <span id="zipProgressText"></span>
+        <progress id="zipProgress" max="100" hidden></progress>
+      </div>
+      <small id="zipStatus" class="zip-status" aria-live="polite"></small>
     </div>
     <label>Logo (image URL or emoji)
       <input type="text" id="fIcon" placeholder="Leave empty to use the first letter" autocapitalize="off" autocomplete="off" spellcheck="false">

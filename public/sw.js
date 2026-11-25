@@ -1,4 +1,4 @@
-const V = 'awesome-hub-v8';
+const V = 'awesome-hub-v9';
 const SHELL = ['/', '/style.css', '/app.js', '/manifest.webmanifest', '/icons/icon.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

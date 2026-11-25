@@ -36,6 +36,7 @@
   const hue = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const isPort = t => /^\d{1,5}$/.test(t);
   const isHostedPage = t => /^\/pages\/[a-f0-9-]+\.html$/i.test(t);
+  const isHostedSite = t => /^(?:\/sites\/|https?:\/\/[^/]+\/sites\/)[a-f0-9-]+\/?$/i.test(t);
   const href = a => (isPort(a.target) ? `${location.protocol}//${location.hostname}:${a.target}` : a.target);
   function norm(t) {
     t = t.trim();
@@ -129,21 +130,23 @@
     if (clearTarget) {
       $('#fTarget').value = '';
       $('#pageStatus').textContent = 'HTML pages are served here in an isolated sandbox.';
+      $('#zipStatus').textContent = 'ZIP needs index.html at its root or in a public/ folder. node_modules folders are skipped. Maximum ZIP size: 100 MB; extracted site: 150 MB; 1000 entries.';
     }
-    const isPage = type === 'html';
-    $('#linkFields').hidden = isPage;
-    $('#pageFields').hidden = !isPage;
-    $('#fTarget').required = !isPage;
+    $('#linkFields').hidden = type !== 'link';
+    $('#pageFields').hidden = type !== 'html';
+    $('#zipFields').hidden = type !== 'zip';
+    $('#fTarget').required = type === 'link';
   }
   function openForm(id) {
     const a = apps.find(x => x.id === id); editId = a ? a.id : null;
     $('#dlgTitle').textContent = a ? 'Edit app' : 'Add app';
     $('#fTitle').value = a ? a.title : '';
     $('#fTarget').value = a ? a.target : '';
-    formType = a && isHostedPage(a.target) ? 'html' : 'link';
+    formType = a && isHostedSite(a.target) ? 'zip' : a && isHostedPage(a.target) ? 'html' : 'link';
     $('#fType').value = formType;
     setFormType(formType);
     $('#pageStatus').textContent = formType === 'html' ? 'Existing hosted HTML page selected.' : 'HTML pages are served here in an isolated sandbox.';
+    $('#zipStatus').textContent = formType === 'zip' ? 'Existing hosted static site selected.' : 'ZIP needs index.html at its root or in a public/ folder. node_modules folders are skipped. Maximum ZIP size: 100 MB; extracted site: 150 MB; 1000 entries.';
     $('#fIcon').value = a ? a.icon : '';
     $('#fFill').checked = a ? a.fill === true : false;
     $('#fTab').checked = a ? a.newTab : true;
@@ -160,8 +163,9 @@
     e.preventDefault();
     const target = $('#fTarget').value.trim();
     if (formType === 'html' && !isHostedPage(target)) { alert('Upload an HTML page before saving.'); return; }
-    if (formType === 'link' && isHostedPage(target)) { alert('Choose HTML page as the card type for a hosted page.'); return; }
-    const o = { id: editId || uid(), title: $('#fTitle').value.trim(), target: formType === 'html' ? target : norm(target),
+    if (formType === 'zip' && !isHostedSite(target)) { alert('Upload a ZIP static site before saving.'); return; }
+    if (formType === 'link' && (isHostedPage(target) || isHostedSite(target))) { alert('Choose the matching hosted page type for this card.'); return; }
+    const o = { id: editId || uid(), title: $('#fTitle').value.trim(), target: formType === 'link' ? norm(target) : target,
       icon: $('#fIcon').value.trim(), fill: $('#fFill').checked, newTab: $('#fTab').checked };
     if (editId) apps = apps.map(a => (a.id === editId ? o : a)); else apps.push(o);
     dlg.close(); render(); save();
@@ -195,6 +199,60 @@
       prev();
     } catch (err) { alert('HTML upload failed: ' + err.message); }
     finally { $('#btnPageUpload').disabled = false; $('#fType').disabled = false; }
+  };
+  $('#btnZipUpload').onclick = () => $('#fZipFile').click();
+  $('#fZipFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    if (!/\.zip$/i.test(f.name)) { alert('Choose a .zip file.'); return; }
+    $('#btnZipUpload').disabled = true;
+    $('#fType').disabled = true;
+    const state = $('#zipUploadState');
+    const progress = $('#zipProgress');
+    const progressText = $('#zipProgressText');
+    const status = $('#zipStatus');
+    state.hidden = false;
+    progress.hidden = false;
+    progress.removeAttribute('value');
+    progressText.textContent = 'Starting upload...';
+    status.textContent = '';
+    try {
+      const j = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload-site');
+        xhr.upload.onprogress = event => {
+          if (event.lengthComputable) {
+            const percent = Math.round(event.loaded / event.total * 100);
+            progress.value = percent;
+            progressText.textContent = `Uploading ZIP: ${percent}%`;
+          }
+        };
+        xhr.upload.onload = () => {
+          progress.removeAttribute('value');
+          progressText.textContent = 'Checking files, extracting site and preparing isolated hosting...';
+        };
+        xhr.onload = () => {
+          let result;
+          try { result = JSON.parse(xhr.responseText); }
+          catch { reject(new Error('The server returned an invalid response.')); return; }
+          if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(result.error || `Upload failed (${xhr.status}).`)); return; }
+          resolve(result);
+        };
+        xhr.onerror = () => reject(new Error('Network error during ZIP upload.'));
+        xhr.onabort = () => reject(new Error('ZIP upload was cancelled.'));
+        xhr.send(f);
+      });
+      $('#fTarget').value = j.url;
+      progress.hidden = true;
+      state.hidden = true;
+      status.textContent = `Ready: ${f.name}`;
+      if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.zip$/i, '');
+      prev();
+    } catch (err) {
+      state.hidden = true;
+      status.textContent = 'Upload failed: ' + err.message;
+      alert('ZIP upload failed: ' + err.message);
+    } finally { $('#btnZipUpload').disabled = false; $('#fType').disabled = false; }
   };
 
   /* ---------- drag and drop (mouse + sentuh) ---------- */
