@@ -10,7 +10,7 @@
   };
   const svg = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
 
-  let apps = [], edit = false, editId = null, drag = null;
+  let apps = [], edit = false, editId = null, drag = null, formType = 'link';
   let ignoreClickUntil = 0;
 
   /* ---------- tema ---------- */
@@ -35,10 +35,11 @@
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const hue = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const isPort = t => /^\d{1,5}$/.test(t);
+  const isHostedPage = t => /^\/pages\/[a-f0-9-]+\.html$/i.test(t);
   const href = a => (isPort(a.target) ? `${location.protocol}//${location.hostname}:${a.target}` : a.target);
   function norm(t) {
     t = t.trim();
-    if (isPort(t) || /^https?:\/\//i.test(t)) return t;
+    if (isPort(t) || /^https?:\/\//i.test(t) || isHostedPage(t)) return t;
     return (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:|\/|$)/i.test(t) ? 'http://' : 'https://') + t;
   }
 
@@ -124,22 +125,43 @@
 
   /* ---------- form tambah/edit ---------- */
   const prev = () => $('#prev').replaceChildren(iconEl($('#fTitle').value || '?', $('#fIcon').value.trim()));
+  function setFormType(type, clearTarget = false) {
+    if (clearTarget) {
+      $('#fTarget').value = '';
+      $('#pageStatus').textContent = 'HTML pages are served here in an isolated sandbox.';
+    }
+    const isPage = type === 'html';
+    $('#linkFields').hidden = isPage;
+    $('#pageFields').hidden = !isPage;
+    $('#fTarget').required = !isPage;
+  }
   function openForm(id) {
     const a = apps.find(x => x.id === id); editId = a ? a.id : null;
     $('#dlgTitle').textContent = a ? 'Edit app' : 'Add app';
     $('#fTitle').value = a ? a.title : '';
     $('#fTarget').value = a ? a.target : '';
+    formType = a && isHostedPage(a.target) ? 'html' : 'link';
+    $('#fType').value = formType;
+    setFormType(formType);
+    $('#pageStatus').textContent = formType === 'html' ? 'Existing hosted HTML page selected.' : 'HTML pages are served here in an isolated sandbox.';
     $('#fIcon').value = a ? a.icon : '';
     $('#fFill').checked = a ? a.fill === true : false;
     $('#fTab').checked = a ? a.newTab : true;
     prev(); dlg.showModal();
   }
+  $('#fType').onchange = () => {
+    formType = $('#fType').value;
+    setFormType(formType, true);
+  };
   $('#fTitle').oninput = $('#fIcon').oninput = prev;
   $('#btnCancel').onclick = () => dlg.close();
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
   $('#frm').onsubmit = e => {
     e.preventDefault();
-    const o = { id: editId || uid(), title: $('#fTitle').value.trim(), target: norm($('#fTarget').value),
+    const target = $('#fTarget').value.trim();
+    if (formType === 'html' && !isHostedPage(target)) { alert('Upload an HTML page before saving.'); return; }
+    if (formType === 'link' && isHostedPage(target)) { alert('Choose HTML page as the card type for a hosted page.'); return; }
+    const o = { id: editId || uid(), title: $('#fTitle').value.trim(), target: formType === 'html' ? target : norm(target),
       icon: $('#fIcon').value.trim(), fill: $('#fFill').checked, newTab: $('#fTab').checked };
     if (editId) apps = apps.map(a => (a.id === editId ? o : a)); else apps.push(o);
     dlg.close(); render(); save();
@@ -155,6 +177,24 @@
       if (!r.ok) throw new Error(j.error);
       $('#fIcon').value = j.url; prev();
     } catch (err) { alert('Upload failed: ' + err.message); }
+  };
+  $('#btnPageUpload').onclick = () => $('#fPageFile').click();
+  $('#fPageFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    if (!/\.html?$/i.test(f.name)) { alert('Choose an .html or .htm file.'); return; }
+    $('#btnPageUpload').disabled = true;
+    $('#fType').disabled = true;
+    try {
+      const r = await fetch('/api/upload-page', { method: 'POST', body: f });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      $('#fTarget').value = j.url;
+      $('#pageStatus').textContent = `Uploaded: ${f.name}`;
+      if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.html?$/i, '');
+      prev();
+    } catch (err) { alert('HTML upload failed: ' + err.message); }
+    finally { $('#btnPageUpload').disabled = false; $('#fType').disabled = false; }
   };
 
   /* ---------- drag and drop (mouse + sentuh) ---------- */

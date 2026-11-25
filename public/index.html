@@ -31,10 +31,23 @@
   <form id="frm">
     <h2 id="dlgTitle"></h2>
     <label>Title (optional)<input type="text" id="fTitle" maxlength="60" autocomplete="off"></label>
-    <label>Address or port
-      <input type="text" id="fTarget" required placeholder="20128 or https://google.com" autocapitalize="off" autocomplete="off" spellcheck="false">
-      <small>A number uses the same host as this hub.</small>
+    <label>Card type
+      <select id="fType">
+        <option value="link">Port or link</option>
+        <option value="html">HTML page</option>
+      </select>
     </label>
+    <div id="linkFields">
+      <label>Address or port
+        <input type="text" id="fTarget" required placeholder="20128 or https://google.com" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <small>A number uses this hub's host.</small>
+      </label>
+    </div>
+    <div id="pageFields" hidden>
+      <button type="button" class="btn" id="btnPageUpload">Upload HTML page</button>
+      <input type="file" id="fPageFile" accept=".html,.htm,text/html" hidden>
+      <small id="pageStatus">HTML pages are served here in an isolated sandbox.</small>
+    </div>
     <label>Logo (image URL or emoji)
       <input type="text" id="fIcon" placeholder="Leave empty to use the first letter" autocapitalize="off" autocomplete="off" spellcheck="false">
     </label>
