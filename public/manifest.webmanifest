@@ -1,6 +1,6 @@
 {
-  "name": "Awsome Hub",
-  "short_name": "Awsome Hub",
+  "name": "Awesome Hub",
+  "short_name": "Awesome Hub",
   "description": "A shortcut hub for local apps and external websites",
   "start_url": "/",
   "scope": "/",

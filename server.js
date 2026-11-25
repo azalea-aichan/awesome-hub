@@ -479,7 +479,7 @@ const hubServer = http.createServer(async (req, res) => {
 });
 
 restoreSiteServers().then(() => {
-  hubServer.listen(PORT, HOST, () => console.log(`AWSOME HUB running at http://${HOST}:${PORT}`));
+  hubServer.listen(PORT, HOST, () => console.log(`AWESOME HUB running at http://${HOST}:${PORT}`));
 }).catch(error => {
   console.error('Could not restore hosted sites:', error.message);
   process.exitCode = 1;

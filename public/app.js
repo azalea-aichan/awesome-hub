@@ -128,7 +128,7 @@
       if (!r.ok) throw 0;
       const cleanupWarning = r.headers.get('X-Cleanup-Warning');
       if (cleanupWarning) alert('Card list was saved, but cleanup was incomplete: ' + cleanupWarning);
-    } catch { alert('Could not save to the server. Check that AWSOME HUB is still running.'); }
+    } catch { alert('Could not save to the server. Check that AWESOME HUB is still running.'); }
   }
   function del(a) {
     if (!confirm(`Delete "${a.title}"?`)) return;

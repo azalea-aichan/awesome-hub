@@ -1,4 +1,4 @@
-# AWSOME HUB
+# AWESOME HUB
 
 A shortcut hub for local apps, external websites, and hosted static sites. Node.js 18+ is required.
 
