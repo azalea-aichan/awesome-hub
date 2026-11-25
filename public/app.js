@@ -10,7 +10,7 @@
   };
   const svg = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
 
-  let apps = [], edit = false, editId = null, drag = null, formType = 'link';
+  let apps = [], edit = false, editId = null, drag = null, formType = 'link', lockedFavicon = '';
   let ignoreClickUntil = 0;
 
   /* ---------- tema ---------- */
@@ -45,6 +45,15 @@
   }
 
   const isImage = icon => /^(https?:\/\/|\/)/i.test(icon);
+  function faviconUrl(target) {
+    if (!target || isHostedPage(target) || isHostedSite(target)) return '';
+    try {
+      const address = isPort(target)
+        ? `${location.protocol}//${location.hostname}:${target}`
+        : norm(target);
+      return `${new URL(address).origin}/favicon.ico`;
+    } catch { return ''; }
+  }
   function iconEl(title, icon) {
     const d = document.createElement('div');
     const letter = () => {
@@ -79,7 +88,7 @@
     else { el.setAttribute('role', 'button'); el.tabIndex = 0; el.setAttribute('aria-label', 'Edit ' + (a.title || 'app')); }
     if (a.fill) el.setAttribute('aria-label', a.title);
     const n = document.createElement('div'); n.className = 'name'; n.textContent = a.title;
-    el.append(iconEl(a.title, a.icon));
+    el.append(iconEl(a.title, a.icon || a.lockedFavicon || faviconUrl(a.target)));
     if (!a.fill && a.title) el.append(n);
     if (edit) el.append(btn('del', 'x', 'Delete ' + (a.title || 'app'), () => del(a)), btn('edt', 'pen', 'Edit ' + (a.title || 'app'), () => openForm(a.id)));
     return el;
@@ -127,7 +136,10 @@
   }
 
   /* ---------- form tambah/edit ---------- */
-  const prev = () => $('#prev').replaceChildren(iconEl($('#fTitle').value || '?', $('#fIcon').value.trim()));
+  const prev = () => $('#prev').replaceChildren(iconEl(
+    $('#fTitle').value || '?',
+    $('#fIcon').value.trim() || (formType === 'link' ? lockedFavicon || faviconUrl($('#fTarget').value.trim()) : '')
+  ));
   const setUploadStatus = (selector, message) => {
     const status = $(selector);
     status.textContent = message;
@@ -136,6 +148,8 @@
   function setFormType(type, clearTarget = false) {
     if (clearTarget) {
       $('#fTarget').value = '';
+      lockedFavicon = '';
+      $('#fLockFavicon').checked = false;
       setUploadStatus('#pageStatus', '');
       setUploadStatus('#zipStatus', '');
     }
@@ -155,6 +169,8 @@
     setUploadStatus('#pageStatus', formType === 'html' ? 'Existing hosted HTML page selected.' : '');
     setUploadStatus('#zipStatus', formType === 'zip' ? 'Existing hosted static site selected.' : '');
     $('#fIcon').value = a ? a.icon : '';
+    lockedFavicon = a && formType === 'link' ? a.lockedFavicon || '' : '';
+    $('#fLockFavicon').checked = Boolean(lockedFavicon);
     $('#fFill').checked = a ? a.fill === true : false;
     $('#fTab').checked = a ? a.newTab : true;
     prev(); dlg.showModal();
@@ -162,8 +178,16 @@
   $('#fType').onchange = () => {
     formType = $('#fType').value;
     setFormType(formType, true);
+    prev();
   };
-  $('#fTitle').oninput = $('#fIcon').oninput = prev;
+  $('#fLockFavicon').onchange = () => {
+    if ($('#fLockFavicon').checked) {
+      lockedFavicon = faviconUrl($('#fTarget').value.trim());
+      if (!lockedFavicon) $('#fLockFavicon').checked = false;
+    } else lockedFavicon = '';
+    prev();
+  };
+  $('#fTitle').oninput = $('#fIcon').oninput = $('#fTarget').oninput = prev;
   $('#btnCancel').onclick = () => dlg.close();
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
   $('#frm').onsubmit = e => {
@@ -173,7 +197,8 @@
     if (formType === 'zip' && !isHostedSite(target)) { alert('Upload a ZIP static site before saving.'); return; }
     if (formType === 'link' && (isHostedPage(target) || isHostedSite(target))) { alert('Choose the matching hosted page type for this card.'); return; }
     const o = { id: editId || uid(), title: $('#fTitle').value.trim(), target: formType === 'link' ? norm(target) : target,
-      icon: $('#fIcon').value.trim(), fill: $('#fFill').checked, newTab: $('#fTab').checked };
+      icon: $('#fIcon').value.trim(), lockedFavicon: formType === 'link' ? lockedFavicon : '',
+      fill: $('#fFill').checked, newTab: $('#fTab').checked };
     if (editId) apps = apps.map(a => (a.id === editId ? o : a)); else apps.push(o);
     dlg.close(); render(); save();
   };

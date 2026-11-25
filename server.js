@@ -48,7 +48,8 @@ function clean(list) {
   return list.map(a => {
     a = a || {};
     return { id: str(a.id, 40) || crypto.randomUUID(), title: str(a.title, 60),
-      target: str(a.target, 500), icon: str(a.icon, 500), newTab: a.newTab !== false, fill: a.fill === true };
+      target: str(a.target, 500), icon: str(a.icon, 500), lockedFavicon: str(a.lockedFavicon, 500),
+      newTab: a.newTab !== false, fill: a.fill === true };
   }).filter(a => /^\d{1,5}$/.test(a.target) || /^https?:\/\//i.test(a.target) ||
     PAGE_TARGET.test(a.target) || SITE_TARGET.test(a.target) || SITE_URL_TARGET.test(a.target));
 }
