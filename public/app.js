@@ -117,6 +117,8 @@
     try {
       const r = await fetch('/api/apps', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(apps) });
       if (!r.ok) throw 0;
+      const cleanupWarning = r.headers.get('X-Cleanup-Warning');
+      if (cleanupWarning) alert('Card list was saved, but cleanup was incomplete: ' + cleanupWarning);
     } catch { alert('Could not save to the server. Check that AWSOME HUB is still running.'); }
   }
   function del(a) {
@@ -126,11 +128,16 @@
 
   /* ---------- form tambah/edit ---------- */
   const prev = () => $('#prev').replaceChildren(iconEl($('#fTitle').value || '?', $('#fIcon').value.trim()));
+  const setUploadStatus = (selector, message) => {
+    const status = $(selector);
+    status.textContent = message;
+    status.hidden = !message;
+  };
   function setFormType(type, clearTarget = false) {
     if (clearTarget) {
       $('#fTarget').value = '';
-      $('#pageStatus').textContent = 'HTML pages are served here in an isolated sandbox.';
-      $('#zipStatus').textContent = 'ZIP needs index.html at its root or in a public/ folder. node_modules folders are skipped. Maximum ZIP size: 100 MB; extracted site: 150 MB; 1000 entries.';
+      setUploadStatus('#pageStatus', '');
+      setUploadStatus('#zipStatus', '');
     }
     $('#linkFields').hidden = type !== 'link';
     $('#pageFields').hidden = type !== 'html';
@@ -145,8 +152,8 @@
     formType = a && isHostedSite(a.target) ? 'zip' : a && isHostedPage(a.target) ? 'html' : 'link';
     $('#fType').value = formType;
     setFormType(formType);
-    $('#pageStatus').textContent = formType === 'html' ? 'Existing hosted HTML page selected.' : 'HTML pages are served here in an isolated sandbox.';
-    $('#zipStatus').textContent = formType === 'zip' ? 'Existing hosted static site selected.' : 'ZIP needs index.html at its root or in a public/ folder. node_modules folders are skipped. Maximum ZIP size: 100 MB; extracted site: 150 MB; 1000 entries.';
+    setUploadStatus('#pageStatus', formType === 'html' ? 'Existing hosted HTML page selected.' : '');
+    setUploadStatus('#zipStatus', formType === 'zip' ? 'Existing hosted static site selected.' : '');
     $('#fIcon').value = a ? a.icon : '';
     $('#fFill').checked = a ? a.fill === true : false;
     $('#fTab').checked = a ? a.newTab : true;
@@ -194,7 +201,7 @@
       const j = await r.json();
       if (!r.ok) throw new Error(j.error);
       $('#fTarget').value = j.url;
-      $('#pageStatus').textContent = `Uploaded: ${f.name}`;
+      setUploadStatus('#pageStatus', `Uploaded: ${f.name}`);
       if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.html?$/i, '');
       prev();
     } catch (err) { alert('HTML upload failed: ' + err.message); }
@@ -210,12 +217,11 @@
     const state = $('#zipUploadState');
     const progress = $('#zipProgress');
     const progressText = $('#zipProgressText');
-    const status = $('#zipStatus');
     state.hidden = false;
     progress.hidden = false;
     progress.removeAttribute('value');
     progressText.textContent = 'Starting upload...';
-    status.textContent = '';
+    setUploadStatus('#zipStatus', '');
     try {
       const j = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -245,12 +251,12 @@
       $('#fTarget').value = j.url;
       progress.hidden = true;
       state.hidden = true;
-      status.textContent = `Ready: ${f.name}`;
+      setUploadStatus('#zipStatus', `Ready: ${f.name}`);
       if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.zip$/i, '');
       prev();
     } catch (err) {
       state.hidden = true;
-      status.textContent = 'Upload failed: ' + err.message;
+      setUploadStatus('#zipStatus', 'Upload failed: ' + err.message);
       alert('ZIP upload failed: ' + err.message);
     } finally { $('#btnZipUpload').disabled = false; $('#fType').disabled = false; }
   };

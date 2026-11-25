@@ -262,7 +262,7 @@ label.chk { display: flex; align-items: center; gap: 10px; color: var(--ink); fo
 .row { display: flex; align-items: center; gap: 12px; }
 #prev .ico { width: 50px; height: 50px; border-radius: 14px; font-size: 22px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
-.zip-requirements {
+.upload-requirements {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -270,10 +270,10 @@ label.chk { display: flex; align-items: center; gap: 10px; color: var(--ink); fo
   color: var(--mute);
   font-size: 13px;
 }
-.zip-requirements strong { color: var(--ink); }
-.zip-requirements ul { margin: 8px 0 0; padding-left: 19px; }
-.zip-requirements li + li { margin-top: 4px; }
-.zip-requirements code { color: var(--ink); }
+.upload-requirements strong { color: var(--ink); }
+.upload-requirements ul { margin: 8px 0 0; padding-left: 19px; }
+.upload-requirements li + li { margin-top: 4px; }
+.upload-requirements code { color: var(--ink); }
 .zip-upload-state {
   display: grid;
   grid-template-columns: 18px 1fr;

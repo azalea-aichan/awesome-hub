@@ -33,6 +33,7 @@ fs.mkdirSync(UP, { recursive: true });
 fs.mkdirSync(SITES, { recursive: true });
 const siteServers = new Map();
 let sitePorts = {};
+let appWriteQueue = Promise.resolve();
 if (!fs.existsSync(DB)) {
   fs.writeFileSync(DB, JSON.stringify([
     { id: crypto.randomUUID(), title: '9Router', target: '20128', icon: '', newTab: true },
@@ -50,6 +51,71 @@ function clean(list) {
       target: str(a.target, 500), icon: str(a.icon, 500), newTab: a.newTab !== false, fill: a.fill === true };
   }).filter(a => /^\d{1,5}$/.test(a.target) || /^https?:\/\//i.test(a.target) ||
     PAGE_TARGET.test(a.target) || SITE_TARGET.test(a.target) || SITE_URL_TARGET.test(a.target));
+}
+
+function collectAssetRefs(list) {
+  const refs = { pages: new Set(), sites: new Set(), uploads: new Set() };
+  for (const app of Array.isArray(list) ? list : []) {
+    if (!app || typeof app !== 'object') continue;
+    const target = typeof app.target === 'string' ? app.target : '';
+    const page = PAGE_TARGET.exec(target);
+    if (page) refs.pages.add(page[0]);
+    const relativeSite = SITE_TARGET.exec(target);
+    if (relativeSite) refs.sites.add(relativeSite[0].split('/')[2]);
+    else if (SITE_URL_TARGET.test(target)) {
+      try {
+        const url = new URL(target);
+        const site = SITE_PATH.exec(url.pathname);
+        const hosted = site && siteServers.get(site[1]);
+        if (hosted && Number(url.port) === hosted.port) refs.sites.add(site[1]);
+      } catch {
+        console.warn('Ignoring malformed hosted site target while collecting asset references.');
+      }
+    }
+    const icon = /^\/uploads\/([a-f0-9-]{36}\.(?:png|jpg|jpeg|webp|gif|svg|ico))$/i.exec(
+      typeof app.icon === 'string' ? app.icon : ''
+    );
+    if (icon) refs.uploads.add(icon[1]);
+  }
+  return refs;
+}
+
+async function cleanupUnusedAssets(previous, next) {
+  const before = collectAssetRefs(previous), after = collectAssetRefs(next);
+  let warning = false;
+  const reportFailure = (kind, name, error) => {
+    warning = true;
+    console.error(`Could not remove unused uploaded ${kind} ${name}:`, error.message);
+  };
+  for (const page of before.pages) {
+    if (after.pages.has(page)) continue;
+    try { await fs.promises.rm(path.join(UP, path.basename(page)), { force: true }); }
+    catch (error) { reportFailure('HTML page', page, error); }
+  }
+  for (const upload of before.uploads) {
+    if (after.uploads.has(upload)) continue;
+    try { await fs.promises.rm(path.join(UP, upload), { force: true }); }
+    catch (error) { reportFailure('logo', upload, error); }
+  }
+  for (const id of before.sites) {
+    if (after.sites.has(id)) continue;
+    const hosted = siteServers.get(id);
+    if (hosted) {
+      try {
+        await new Promise((resolve, reject) => {
+          hosted.server.close(error => error ? reject(error) : resolve());
+          hosted.server.closeAllConnections();
+        });
+      } catch (error) { reportFailure('site server', id, error); }
+      siteServers.delete(id);
+    }
+    delete sitePorts[id];
+    try { persistSitePorts(); }
+    catch (error) { reportFailure('site port record', id, error); }
+    try { await fs.promises.rm(path.join(SITES, id), { recursive: true, force: true }); }
+    catch (error) { reportFailure('ZIP site', id, error); }
+  }
+  return warning;
 }
 
 function readBody(req, limit) {
@@ -314,9 +380,18 @@ const hubServer = http.createServer(async (req, res) => {
       if (req.method === 'GET') return send(res, 200, fs.readFileSync(DB), { 'Cache-Control': 'no-store' });
       if (req.method === 'PUT') {
         const list = clean(JSON.parse((await readBody(req, 1e6)).toString()));
-        fs.writeFileSync(DB + '.tmp', JSON.stringify(list, null, 2));
-        fs.renameSync(DB + '.tmp', DB);
-        return send(res, 200, JSON.stringify(list));
+        const update = appWriteQueue.then(async () => {
+          const previous = JSON.parse(fs.readFileSync(DB, 'utf8'));
+          fs.writeFileSync(DB + '.tmp', JSON.stringify(list, null, 2));
+          fs.renameSync(DB + '.tmp', DB);
+          const cleanupWarning = await cleanupUnusedAssets(previous, list);
+          return { cleanupWarning };
+        });
+        appWriteQueue = update.catch(error => console.error('App list update failed:', error.message));
+        const { cleanupWarning } = await update;
+        return send(res, 200, JSON.stringify(list), cleanupWarning ? {
+          'X-Cleanup-Warning': 'Some unused uploaded files could not be removed; check the server log.'
+        } : {});
       }
       return send(res, 405, '{"error":"Method not allowed"}');
     }
