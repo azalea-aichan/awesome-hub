@@ -245,9 +245,10 @@ dialog[open] { animation: pop .18s ease-out; }
 @keyframes pop { from { transform: translateY(10px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
 form { display: grid; gap: 15px; padding: 24px; }
 h2 { margin: 0; font-size: 20px; }
+[hidden] { display: none !important; }
 label { display: grid; gap: 7px; color: var(--mute); font-size: 13px; font-weight: 650; }
 label small { font-weight: 400; }
-input[type=text], select {
+input[type=text], select, textarea {
   width: 100%;
   padding: 11px 13px;
   border: 1px solid var(--line);
@@ -256,7 +257,8 @@ input[type=text], select {
   color: var(--ink);
   font-size: 16px;
 }
-input[type=text]:focus, select:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; resize: vertical; }
+input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); }
 label.chk { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 500; }
 .chk input { width: 18px; height: 18px; accent-color: var(--accent); }
 .row { display: flex; align-items: center; gap: 12px; }

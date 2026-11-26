@@ -36,6 +36,7 @@
         <option value="link">Port or link</option>
         <option value="html">HTML page</option>
         <option value="zip">ZIP static site</option>
+        <option value="app">ZIP Node app</option>
       </select>
     </label>
     <div id="linkFields">
@@ -52,7 +53,7 @@
         <strong>Upload requirements</strong>
         <ul>
           <li>Upload one <code>.html</code> or <code>.htm</code> file, up to 5 MB.</li>
-          <li>Inline scripts and styles work; external files and network requests are blocked.</li>
+          <li>Inline scripts and styles work; external files are blocked. API calls work only for hosts listed in <em>API hosts</em>.</li>
           <li>The page runs isolated from the hub. Use ZIP static site for multiple files.</li>
         </ul>
       </div>
@@ -77,6 +78,29 @@
       </div>
       <small id="zipStatus" class="zip-status" aria-live="polite" hidden></small>
     </div>
+    <div id="appFields" hidden>
+      <button type="button" class="btn" id="btnAppUpload">Upload ZIP</button>
+      <input type="file" id="fAppFile" accept=".zip,application/zip" hidden>
+      <div class="upload-requirements">
+        <strong>Upload requirements</strong>
+        <ul>
+          <li>The hub runs the project with Node.js. It needs <code>server.js</code> (or <code>main</code> in <code>package.json</code>, <code>index.js</code>, <code>app.js</code>).</li>
+          <li>The app must listen on <code>process.env.PORT</code> on all interfaces. The hub assigns the port.</li>
+          <li>Runtime dependencies in <code>package.json</code> are installed automatically.</li>
+          <li>Only upload projects you trust: the code runs on this server.</li>
+          <li>Deleting the card stops the app and deletes its files.</li>
+        </ul>
+      </div>
+      <small id="appStatus" class="zip-status" aria-live="polite" hidden></small>
+      <label>Environment variables (optional)
+        <textarea id="fEnv" rows="4" placeholder="NAME=value (one per line, names as your project expects)" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+        <small>One KEY=VALUE per line. Kept on the server only. Saved values show as ******** and stay unchanged unless you edit that line.</small>
+      </label>
+    </div>
+    <label id="apiFields" hidden>API hosts (optional)
+      <input type="text" id="fApiHosts" placeholder="ninehermes.gorgon-iwato.ts.net, api.example.com" autocapitalize="off" autocomplete="off" spellcheck="false">
+      <small>Hostnames (any port) that this project may call. Requests go through the hub proxy, so no CORS setup is needed. Separate with commas.</small>
+    </label>
     <label>Logo (image URL or emoji)
       <input type="text" id="fIcon" placeholder="Leave empty to use the site favicon, or first letter" autocapitalize="off" autocomplete="off" spellcheck="false">
     </label>

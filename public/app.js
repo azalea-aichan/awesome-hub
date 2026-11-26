@@ -36,6 +36,23 @@
   const hue = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const isPort = t => /^\d{1,5}$/.test(t);
   const isHostedPage = t => /^\/pages\/[a-f0-9-]+\.html$/i.test(t);
+  const ENV_MASK = '********';
+  const isHostedApp = t => /^\/apps\/[a-f0-9-]+\/?$/i.test(t);
+  const envKeysOf = text => String(text || '').split(/\r?\n/).map(l => l.trim())
+    .filter(l => l && !l.startsWith('#') && l.includes('=')).map(l => l.slice(0, l.indexOf('=')).trim()).filter(Boolean);
+  const envProblem = text => {
+    const lines = String(text || '').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith('#')) continue;
+      const index = line.indexOf('=');
+      if (index < 1) return `Environment variables, line ${i + 1} has no variable name. Write it as NAME=value.`;
+      const key = line.slice(0, index).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return `Environment variables, line ${i + 1}: the name before "=" is not valid (use letters, digits and _, not starting with a digit).`;
+      if (key === 'PORT' || key === 'HOST') return `Environment variables, line ${i + 1}: ${key} is set by the hub and cannot be overridden.`;
+    }
+    return '';
+  };
   const isHostedSite = t => /^(?:\/sites\/|https?:\/\/[^/]+\/sites\/)[a-f0-9-]+\/?$/i.test(t);
   const href = a => (isPort(a.target) ? `${location.protocol}//${location.hostname}:${a.target}` : a.target);
   function norm(t) {
@@ -46,7 +63,7 @@
 
   const isImage = icon => /^(https?:\/\/|\/)/i.test(icon);
   function faviconUrl(target) {
-    if (!target || isHostedPage(target) || isHostedSite(target)) return '';
+    if (!target || isHostedPage(target) || isHostedSite(target) || isHostedApp(target)) return '';
     try {
       const address = isPort(target)
         ? `${location.protocol}//${location.hostname}:${target}`
@@ -125,10 +142,18 @@
   async function save() {
     try {
       const r = await fetch('/api/apps', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(apps) });
-      if (!r.ok) throw 0;
+      if (!r.ok) {
+        let serverMessage = '';
+        try { serverMessage = (await r.json()).error || ''; } catch {}
+        throw Object.assign(new Error('save failed'), { serverMessage });
+      }
+      apps.forEach(a => { delete a.env; });
       const cleanupWarning = r.headers.get('X-Cleanup-Warning');
       if (cleanupWarning) alert('Card list was saved, but cleanup was incomplete: ' + cleanupWarning);
-    } catch { alert('Could not save to the server. Check that AWESOME HUB is still running.'); }
+    } catch (error) {
+      alert(error && error.serverMessage ? 'Could not save: ' + error.serverMessage
+        : 'Could not save to the server. Check that AWESOME HUB is still running.');
+    }
   }
   function del(a) {
     if (!confirm(`Delete "${a.title}"?`)) return;
@@ -152,22 +177,31 @@
       $('#fLockFavicon').checked = false;
       setUploadStatus('#pageStatus', '');
       setUploadStatus('#zipStatus', '');
+      setUploadStatus('#appStatus', '');
+      $('#fEnv').value = '';
     }
     $('#linkFields').hidden = type !== 'link';
     $('#pageFields').hidden = type !== 'html';
     $('#zipFields').hidden = type !== 'zip';
+    $('#appFields').hidden = type !== 'app';
     $('#fTarget').required = type === 'link';
+    $('#apiFields').hidden = type === 'link' || type === 'app';
+    if (clearTarget) $('#fApiHosts').value = '';
   }
   function openForm(id) {
     const a = apps.find(x => x.id === id); editId = a ? a.id : null;
     $('#dlgTitle').textContent = a ? 'Edit app' : 'Add app';
     $('#fTitle').value = a ? a.title : '';
     $('#fTarget').value = a ? a.target : '';
-    formType = a && isHostedSite(a.target) ? 'zip' : a && isHostedPage(a.target) ? 'html' : 'link';
+    formType = a && isHostedSite(a.target) ? 'zip' : a && isHostedPage(a.target) ? 'html' : a && isHostedApp(a.target) ? 'app' : 'link';
     $('#fType').value = formType;
     setFormType(formType);
     setUploadStatus('#pageStatus', formType === 'html' ? 'Existing hosted HTML page selected.' : '');
     setUploadStatus('#zipStatus', formType === 'zip' ? 'Existing hosted static site selected.' : '');
+    setUploadStatus('#appStatus', formType === 'app' ? 'Existing Node app selected.' : '');
+    $('#fEnv').value = a && formType === 'app'
+      ? (typeof a.env === 'string' ? a.env : [].concat(a.envKeys || []).map(k => k + '=' + ENV_MASK).join('\n')) : '';
+    $('#fApiHosts').value = a && (formType === 'html' || formType === 'zip') ? [].concat(a.apiHosts || []).join(', ') : '';
     $('#fIcon').value = a ? a.icon : '';
     lockedFavicon = a && formType === 'link' ? a.lockedFavicon || '' : '';
     $('#fLockFavicon').checked = Boolean(lockedFavicon);
@@ -195,10 +229,17 @@
     const target = $('#fTarget').value.trim();
     if (formType === 'html' && !isHostedPage(target)) { alert('Upload an HTML page before saving.'); return; }
     if (formType === 'zip' && !isHostedSite(target)) { alert('Upload a ZIP static site before saving.'); return; }
-    if (formType === 'link' && (isHostedPage(target) || isHostedSite(target))) { alert('Choose the matching hosted page type for this card.'); return; }
+    if (formType === 'app' && !isHostedApp(target)) { alert('Upload a ZIP Node app before saving.'); return; }
+    if (formType === 'app') {
+      const problem = envProblem($('#fEnv').value);
+      if (problem) { alert(problem); $('#fEnv').focus(); return; }
+    }
+    if (formType === 'link' && (isHostedPage(target) || isHostedSite(target) || isHostedApp(target))) { alert('Choose the matching hosted page type for this card.'); return; }
     const o = { id: editId || uid(), title: $('#fTitle').value.trim(), target: formType === 'link' ? norm(target) : target,
       icon: $('#fIcon').value.trim(), lockedFavicon: formType === 'link' ? lockedFavicon : '',
-      fill: $('#fFill').checked, newTab: $('#fTab').checked };
+      fill: $('#fFill').checked, newTab: $('#fTab').checked,
+      apiHosts: formType !== 'html' && formType !== 'zip' ? [] : $('#fApiHosts').value.split(/[\s,;]+/).filter(Boolean) };
+    if (formType === 'app') { o.env = $('#fEnv').value; o.envKeys = envKeysOf(o.env); }
     if (editId) apps = apps.map(a => (a.id === editId ? o : a)); else apps.push(o);
     dlg.close(); render(); save();
   };
@@ -231,6 +272,42 @@
       prev();
     } catch (err) { alert('HTML upload failed: ' + err.message); }
     finally { $('#btnPageUpload').disabled = false; $('#fType').disabled = false; }
+  };
+  $('#btnAppUpload').onclick = () => $('#fAppFile').click();
+  $('#fAppFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    if (!/\.zip$/i.test(f.name)) { alert('Choose a .zip file.'); return; }
+    $('#btnAppUpload').disabled = true;
+    $('#fType').disabled = true;
+    setUploadStatus('#appStatus', 'Starting upload...');
+    try {
+      const j = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload-app');
+        xhr.upload.onprogress = event => {
+          if (event.lengthComputable) setUploadStatus('#appStatus', `Uploading ZIP: ${Math.round(event.loaded / event.total * 100)}%`);
+        };
+        xhr.upload.onload = () => setUploadStatus('#appStatus', 'Extracting, installing dependencies and starting the app...');
+        xhr.onload = () => {
+          let result;
+          try { result = JSON.parse(xhr.responseText); }
+          catch { reject(new Error('The server returned an invalid response.')); return; }
+          if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(result.error || `Upload failed (${xhr.status}).`)); return; }
+          resolve(result);
+        };
+        xhr.onerror = () => reject(new Error('Network error during ZIP upload.'));
+        xhr.onabort = () => reject(new Error('ZIP upload was cancelled.'));
+        xhr.send(f);
+      });
+      $('#fTarget').value = j.url;
+      setUploadStatus('#appStatus', j.warning ? `Uploaded, but ${j.warning}` : `Ready: ${f.name}`);
+      if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.zip$/i, '');
+      prev();
+    } catch (err) {
+      setUploadStatus('#appStatus', 'Upload failed: ' + err.message);
+      alert('Node app upload failed: ' + err.message);
+    } finally { $('#btnAppUpload').disabled = false; $('#fType').disabled = false; }
   };
   $('#btnZipUpload').onclick = () => $('#fZipFile').click();
   $('#fZipFile').onchange = async e => {
