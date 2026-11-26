@@ -443,7 +443,7 @@ function serveSiteFile(id, req, res) {
     'Content-Type': contentType,
     'Content-Length': body ? body.length : st.size,
     'Cache-Control': 'no-cache',
-    'Content-Security-Policy': `default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src ${[...(SITE_API_PROXY || apiHosts.length ? ["'self'"] : []), ...SITE_CONNECT_SOURCES].join(' ') || "'none'"}; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; sandbox allow-scripts allow-same-origin allow-downloads`
+    'Content-Security-Policy': `default-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src ${[...(SITE_API_PROXY || apiHosts.length ? ["'self'"] : []), ...SITE_CONNECT_SOURCES].join(' ') || "'none'"}; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; sandbox allow-scripts allow-same-origin allow-downloads allow-popups allow-popups-to-escape-sandbox`
   });
   if (req.method === 'HEAD') return res.end();
   if (body) return res.end(body);
@@ -1346,7 +1346,7 @@ const hubServer = http.createServer(async (req, res) => {
     if (isPage) {
       const pageId = path.basename(p, '.html');
       const pageHosts = cardApiHosts('page', pageId);
-      h['Content-Security-Policy'] = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src ${pageHosts.length ? "'self'" : "'none'"}; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts`;
+      h['Content-Security-Policy'] = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src ${pageHosts.length ? "'self'" : "'none'"}; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox`;
       if (pageHosts.length) {
         const prefix = `/__page_api/${pageId}`;
         pageBody = Buffer.from(injectApiShim(rewriteApiHosts(fs.readFileSync(file, 'utf8'), pageHosts, prefix), pageHosts, prefix));
