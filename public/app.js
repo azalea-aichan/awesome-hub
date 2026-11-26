@@ -63,7 +63,9 @@
 
   const isImage = icon => /^(https?:\/\/|\/)/i.test(icon);
   function faviconUrl(target) {
-    if (!target || isHostedPage(target) || isHostedSite(target) || isHostedApp(target)) return '';
+    if (!target) return '';
+    // Hosted projects: the server looks for the icon the project declares (link rel=icon) or a favicon file.
+    if (isHostedPage(target) || isHostedSite(target) || isHostedApp(target)) return '/api/favicon?target=' + encodeURIComponent(target);
     try {
       const address = isPort(target)
         ? `${location.protocol}//${location.hostname}:${target}`
@@ -163,14 +165,29 @@
   /* ---------- form tambah/edit ---------- */
   const prev = () => $('#prev').replaceChildren(iconEl(
     $('#fTitle').value || '?',
-    $('#fIcon').value.trim() || (formType === 'link' ? lockedFavicon || faviconUrl($('#fTarget').value.trim()) : '')
+    $('#fIcon').value.trim() || (formType === 'link' ? lockedFavicon : '') || faviconUrl($('#fTarget').value.trim())
   ));
   const setUploadStatus = (selector, message) => {
     const status = $(selector);
     status.textContent = message;
     status.hidden = !message;
   };
+  // Uploads made in the open form that no saved card uses yet. They are removed on Cancel, when replaced by a newer upload, or when the type changes.
+  let pendingTarget = '', pendingIcon = '', formSession = 0, formSaved = false;
+  const discardUpload = url => {
+    if (!url) return;
+    fetch('/api/discard-upload', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }), keepalive: true }).catch(() => {});
+  };
+  // Returns false (and removes the file again) when the form was closed or reopened while the upload was running.
+  function adoptUpload(kind, url, session) {
+    if (session !== formSession || !dlg.open) { discardUpload(url); return false; }
+    if (kind === 'icon') { if (pendingIcon && pendingIcon !== url) discardUpload(pendingIcon); pendingIcon = url; }
+    else { if (pendingTarget && pendingTarget !== url) discardUpload(pendingTarget); pendingTarget = url; }
+    return true;
+  }
   function setFormType(type, clearTarget = false) {
+    if (clearTarget && pendingTarget) { discardUpload(pendingTarget); pendingTarget = ''; }
     if (clearTarget) {
       $('#fTarget').value = '';
       lockedFavicon = '';
@@ -207,6 +224,7 @@
     $('#fLockFavicon').checked = Boolean(lockedFavicon);
     $('#fFill').checked = a ? a.fill === true : false;
     $('#fTab').checked = a ? a.newTab : true;
+    formSession++; formSaved = false; pendingTarget = ''; pendingIcon = '';
     prev(); dlg.showModal();
   }
   $('#fType').onchange = () => {
@@ -223,7 +241,12 @@
   };
   $('#fTitle').oninput = $('#fIcon').oninput = $('#fTarget').oninput = prev;
   $('#btnCancel').onclick = () => dlg.close();
-  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+  // Clicking outside the form or pressing Esc does not close it; only Cancel or Save do.
+  dlg.addEventListener('cancel', e => e.preventDefault());
+  dlg.addEventListener('close', () => {
+    if (!formSaved) { discardUpload(pendingTarget); discardUpload(pendingIcon); }
+    pendingTarget = ''; pendingIcon = '';
+  });
   $('#frm').onsubmit = e => {
     e.preventDefault();
     const target = $('#fTarget').value.trim();
@@ -241,6 +264,9 @@
       apiHosts: formType !== 'html' && formType !== 'zip' ? [] : $('#fApiHosts').value.split(/[\s,;]+/).filter(Boolean) };
     if (formType === 'app') { o.env = $('#fEnv').value; o.envKeys = envKeysOf(o.env); }
     if (editId) apps = apps.map(a => (a.id === editId ? o : a)); else apps.push(o);
+    if (pendingTarget && pendingTarget !== o.target) discardUpload(pendingTarget);
+    if (pendingIcon && pendingIcon !== o.icon) discardUpload(pendingIcon);
+    formSaved = true;
     dlg.close(); render(); save();
   };
   $('#btnUpload').onclick = () => $('#fFile').click();
@@ -248,10 +274,12 @@
     const f = e.target.files[0]; e.target.value = '';
     if (!f) return;
     const ext = (f.name.split('.').pop() || '').toLowerCase();
+    const session = formSession;
     try {
       const r = await fetch('/api/upload?ext=' + encodeURIComponent(ext), { method: 'POST', body: f });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error);
+      if (!adoptUpload('icon', j.url, session)) return;
       $('#fIcon').value = j.url; prev();
     } catch (err) { alert('Upload failed: ' + err.message); }
   };
@@ -262,10 +290,12 @@
     if (!/\.html?$/i.test(f.name)) { alert('Choose an .html or .htm file.'); return; }
     $('#btnPageUpload').disabled = true;
     $('#fType').disabled = true;
+    const session = formSession;
     try {
       const r = await fetch('/api/upload-page', { method: 'POST', body: f });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error);
+      if (!adoptUpload('target', j.url, session)) return;
       $('#fTarget').value = j.url;
       setUploadStatus('#pageStatus', `Uploaded: ${f.name}`);
       if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.html?$/i, '');
@@ -281,6 +311,7 @@
     $('#btnAppUpload').disabled = true;
     $('#fType').disabled = true;
     setUploadStatus('#appStatus', 'Starting upload...');
+    const session = formSession;
     try {
       const j = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -300,6 +331,7 @@
         xhr.onabort = () => reject(new Error('ZIP upload was cancelled.'));
         xhr.send(f);
       });
+      if (!adoptUpload('target', j.url, session)) { setUploadStatus('#appStatus', ''); return; }
       $('#fTarget').value = j.url;
       setUploadStatus('#appStatus', j.warning ? `Uploaded, but ${j.warning}` : `Ready: ${f.name}`);
       if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.zip$/i, '');
@@ -324,6 +356,7 @@
     progress.removeAttribute('value');
     progressText.textContent = 'Starting upload...';
     setUploadStatus('#zipStatus', '');
+    const session = formSession;
     try {
       const j = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -350,9 +383,10 @@
         xhr.onabort = () => reject(new Error('ZIP upload was cancelled.'));
         xhr.send(f);
       });
-      $('#fTarget').value = j.url;
       progress.hidden = true;
       state.hidden = true;
+      if (!adoptUpload('target', j.url, session)) return;
+      $('#fTarget').value = j.url;
       setUploadStatus('#zipStatus', `Ready: ${f.name}`);
       if (!$('#fTitle').value.trim()) $('#fTitle').value = f.name.replace(/\.zip$/i, '');
       prev();

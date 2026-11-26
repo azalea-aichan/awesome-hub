@@ -740,6 +740,15 @@ function appLog(id, rec, chunk) {
   }
 }
 
+// A browser script (document/window/addEventListener, no Node APIs) must never be run as a server.
+function looksLikeBrowserScript(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8').slice(0, 200000); } catch { return false; }
+  const browser = /\b(?:document|window|localStorage|navigator)\s*[.[]|(?:^|[^.\w])addEventListener\s*\(/m.test(text);
+  const node = /\brequire\s*\(|\bfrom\s+['"](?:node:[a-z/]+|http|https|http2|fs|path|os|url|crypto|express|fastify|koa)['"]|\bprocess\.(?:env|argv|exit)|\.listen\s*\(/.test(text);
+  return browser && !node;
+}
+
 function findAppEntry(dir) {
   const root = path.resolve(dir);
   const candidates = [];
@@ -751,10 +760,19 @@ function findAppEntry(dir) {
   for (const candidate of candidates) {
     const file = path.resolve(root, candidate);
     try {
-      if (file.startsWith(root + path.sep) && fs.statSync(file).isFile()) return file;
+      if (file.startsWith(root + path.sep) && fs.statSync(file).isFile() && !looksLikeBrowserScript(file)) return file;
     } catch {}
   }
   return null;
+}
+
+function hasStaticIndex(dir) {
+  const places = [dir, path.join(dir, 'public')];
+  try {
+    const subs = fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== '__MACOSX');
+    if (subs.length === 1) places.push(path.join(dir, subs[0].name), path.join(dir, subs[0].name, 'public'));
+  } catch {}
+  return places.some(place => fs.existsSync(path.join(place, 'index.html')));
 }
 
 function findAppRoot(temp) {
@@ -867,7 +885,7 @@ function stopNodeApp(id) {
 async function startNodeApp(id) {
   const dir = path.join(APPS, id);
   const entry = findAppEntry(dir);
-  if (!entry) throw new Error('No entry file found (server.js, package.json "main", index.js or app.js)');
+  if (!entry) throw new Error('No Node server file found (server.js, package.json "main", index.js or app.js). If this is a frontend-only project, edit the card, choose "ZIP static site" and upload the ZIP again.');
   await stopNodeApp(id);
   const port = await pickAppPort(appPorts[id]);
   const userEnv = cardEnvForApp(id);
@@ -949,7 +967,8 @@ function appStatusPage(res, code, title, message, rec) {
   const logs = rec && rec.logs.length ? rec.logs.slice(-30).join('\n') : '(no output yet)';
   const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>` +
     '<style>body{font:16px system-ui;max-width:720px;margin:2rem auto;padding:0 1rem;color:#222}pre{background:#111;color:#ddd;padding:1rem;border-radius:8px;overflow:auto;white-space:pre-wrap}</style>' +
-    `<h1>${esc(title)}</h1><p>${esc(message)}</p><h2>Last output</h2><pre>${esc(logs)}</pre><p>Reload this page to try again.</p>`;
+    `<h1>${esc(title)}</h1><p>${esc(message)}</p>${/\b(?:document|window|navigator|localStorage|addEventListener) is not defined/.test(logs)
+      ? '<p><strong>This looks like a browser (frontend) project, not a Node server.</strong> Edit the card, choose <em>ZIP static site</em> and upload the ZIP again.</p>' : ''}<h2>Last output</h2><pre>${esc(logs)}</pre><p>Reload this page to try again.</p>`;
   res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
   res.end(body);
@@ -982,6 +1001,157 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
   });
 }
 
+/* ---------- favicon lookup for hosted cards (HTML page, ZIP static site, ZIP Node app) ---------- */
+const ICON_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', ico: 'image/x-icon' };
+const ICON_DATA_MIME = new Set(['image/png', 'image/jpeg', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/gif', 'image/webp']);
+const ICON_LIMIT = 1024 * 1024;
+const ICON_FALLBACKS = ['favicon.ico', 'favicon.png', 'favicon.svg', 'apple-touch-icon.png', 'icon.png', 'icon.svg'];
+
+// <link rel="icon"> / "shortcut icon" first, then apple-touch-icon. "mask-icon" is ignored.
+function iconHrefsFromHtml(html) {
+  const primary = [], secondary = [];
+  // Quote-aware, so a '>' inside a quoted href (inline SVG) does not end the tag early.
+  for (const tag of String(html).match(/<link\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>/gi) || []) {
+    const attrs = {};
+    tag.replace(/([a-z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi, (match, name, a, b, c) => {
+      attrs[name.toLowerCase()] = a ?? b ?? c ?? '';
+      return match;
+    });
+    const rel = String(attrs.rel || '').toLowerCase().split(/\s+/);
+    const href = String(attrs.href || '').trim();
+    if (!href) continue;
+    if (rel.includes('icon')) primary.push(href);
+    else if (rel.includes('apple-touch-icon') || rel.includes('apple-touch-icon-precomposed')) secondary.push(href);
+  }
+  return primary.concat(secondary);
+}
+
+function dataUriIcon(href) {
+  // data:image/svg+xml;utf8,<...>  |  data:image/png;base64,<...>  |  data:image/svg+xml;charset=utf-8;base64,<...>
+  const match = /^data:(image\/[a-z0-9.+-]+)((?:;[a-z0-9.+=_-]+)*),([\s\S]*)$/i.exec(href);
+  if (!match || !ICON_DATA_MIME.has(match[1].toLowerCase())) return null;
+  let buffer;
+  if (/;base64/i.test(match[2])) buffer = Buffer.from(match[3], 'base64');
+  else {
+    let text = match[3];
+    try { text = decodeURIComponent(text); } catch {}
+    buffer = Buffer.from(text);
+  }
+  return buffer.length && buffer.length <= ICON_LIMIT ? { buffer, mime: match[1].toLowerCase() } : null;
+}
+
+function localIcon(root, href) {
+  let relative = href.split(/[?#]/)[0];
+  try { relative = decodeURIComponent(relative); } catch { return null; }
+  const base = path.resolve(root);
+  const file = path.resolve(base, relative.replace(/^\/+/, ''));
+  const ext = path.extname(file).slice(1).toLowerCase();
+  if (!file.startsWith(base + path.sep) || !ICON_MIME[ext]) return null;
+  try {
+    const stat = fs.statSync(file);
+    return stat.isFile() && stat.size > 0 && stat.size <= ICON_LIMIT ? { file, mime: ICON_MIME[ext] } : null;
+  } catch { return null; }
+}
+
+// One href from a page: inline data URI, an absolute URL (the browser loads it itself) or null for anything relative.
+function absoluteIcon(href) {
+  if (/^data:/i.test(href)) return dataUriIcon(href);
+  if (/^https?:\/\//i.test(href)) {
+    try { return { redirect: new URL(href).href }; } catch { return null; }
+  }
+  return null;
+}
+const isRelativeHref = href => !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('//');
+
+// One folder: the <link rel="icon"> of its index.html first, then the usual file names.
+function iconInDir(root) {
+  let html = '';
+  try {
+    const file = path.join(root, 'index.html');
+    if (fs.statSync(file).size <= ICON_LIMIT) html = fs.readFileSync(file, 'utf8');
+  } catch {}
+  for (const href of iconHrefsFromHtml(html)) {
+    const found = isRelativeHref(href) ? localIcon(root, href) : absoluteIcon(href);
+    if (found) return found;
+  }
+  for (const name of ICON_FALLBACKS) {
+    const found = localIcon(root, name);
+    if (found) return found;
+  }
+  return null;
+}
+
+function fetchLocal(port, pathname, wantHtml) {
+  return new Promise(resolve => {
+    const request = http.get({ host: '127.0.0.1', port, path: pathname, timeout: 2500,
+      headers: { Accept: wantHtml ? 'text/html' : 'image/*' } }, response => {
+      const type = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (response.statusCode !== 200 || !(wantHtml ? type === 'text/html' : ICON_DATA_MIME.has(type))) {
+        response.resume();
+        return resolve(null);
+      }
+      const chunks = [];
+      let size = 0;
+      response.on('data', chunk => {
+        size += chunk.length;
+        if (size > ICON_LIMIT) { response.destroy(); resolve(null); } else chunks.push(chunk);
+      });
+      response.on('end', () => resolve({ buffer: Buffer.concat(chunks), mime: type }));
+      response.on('error', () => resolve(null));
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve(null));
+  });
+}
+
+// For a running Node app: read what the app itself serves (it may build its HTML on the fly).
+async function runningAppIcon(port) {
+  const page = await fetchLocal(port, '/', true);
+  const hrefs = (page ? iconHrefsFromHtml(page.buffer.toString('utf8')) : []).concat('/favicon.ico');
+  let requests = 0;
+  for (const href of hrefs) {
+    if (!isRelativeHref(href)) {
+      const found = absoluteIcon(href);
+      if (found) return found;
+      continue;
+    }
+    if (++requests > 3) break;
+    let pathname;
+    try { const url = new URL(href, 'http://127.0.0.1/'); pathname = url.pathname + url.search; } catch { continue; }
+    const got = await fetchLocal(port, pathname, false);
+    if (got) return got;
+  }
+  return null;
+}
+
+async function hostedFavicon(target) {
+  const page = PAGE_TARGET.exec(target);
+  if (page) {
+    let html = '';
+    try { html = fs.readFileSync(path.join(UP, path.basename(page[0])), 'utf8'); } catch { return null; }
+    for (const href of iconHrefsFromHtml(html)) {
+      const found = absoluteIcon(href);
+      if (found) return found;
+    }
+    return null;
+  }
+  const site = /\/sites\/([a-f0-9-]+)\/?$/i.exec(target);
+  if (site) {
+    const directory = path.join(SITES, site[1].toLowerCase());
+    return iconInDir(fs.existsSync(path.join(directory, 'index.html')) ? directory : path.join(directory, 'public'));
+  }
+  const id = appId(target);
+  if (id) {
+    for (const sub of ['public', 'static', 'dist', 'build', 'www', '.']) {
+      const found = iconInDir(path.join(APPS, id, sub));
+      if (found) return found;
+    }
+    const rec = nodeApps.get(id);
+    if (rec && !rec.exited) return runningAppIcon(rec.port);
+  }
+  return null;
+}
+
 const hubServer = http.createServer(async (req, res) => {
   try {
     const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -992,6 +1162,16 @@ const hubServer = http.createServer(async (req, res) => {
       const pageMatch = /^\/__page_api\/([a-f0-9-]+)(?=\/)/i.exec(parsedUrl.pathname);
       if (!pageMatch) return send(res, 404, '{"error":"Not found"}');
       return proxyAllowedApi(req, res, parsedUrl, `/__page_api/${pageMatch[1]}`, cardApiHosts('page', pageMatch[1]), true);
+    }
+
+    if (p === '/api/favicon' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const found = await hostedFavicon(String(query.get('target') || '').slice(0, 300));
+      if (!found) return send(res, 404, '{"error":"No favicon found"}', { 'Cache-Control': 'no-cache' });
+      if (found.redirect) { res.writeHead(302, { Location: found.redirect, 'Cache-Control': 'no-cache' }); return res.end(); }
+      const body = found.buffer || fs.readFileSync(found.file);
+      res.writeHead(200, { 'Content-Type': found.mime, 'Content-Length': body.length, 'Cache-Control': 'public, max-age=300',
+        'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
+      return res.end(req.method === 'HEAD' ? undefined : body);
     }
 
     if (p === '/api/apps') {
@@ -1058,7 +1238,9 @@ const hubServer = http.createServer(async (req, res) => {
       try {
         await extractArchive(buf, temp);
         const root = findAppRoot(temp);
-        if (!root) throw httpError('A Node app ZIP needs server.js (or "main" in package.json, index.js or app.js). For a site without a backend, choose "ZIP static site".', 400);
+        if (!root) throw httpError(hasStaticIndex(temp)
+          ? 'This ZIP looks like a static site (it has index.html but no Node server file such as server.js). Choose "ZIP static site" for it.'
+          : 'A Node app ZIP needs server.js (or "main" in package.json, index.js or app.js). For a site without a backend, choose "ZIP static site".', 400);
         await fs.promises.rename(root, destination);
         await fs.promises.rm(temp, { recursive: true, force: true });
         await installAppDependencies(destination);
@@ -1076,6 +1258,27 @@ const hubServer = http.createServer(async (req, res) => {
         await fs.promises.rm(destination, { recursive: true, force: true });
         throw error;
       }
+    }
+
+    if (p === '/api/discard-upload' && req.method === 'POST') {
+      let url = '';
+      try { url = JSON.parse((await readBody(req, 1e4)).toString()).url; } catch {}
+      if (typeof url !== 'string') url = '';
+      const subject = [{ target: url, icon: url }];
+      const wanted = collectAssetRefs(subject);
+      if (!Object.values(wanted).some(set => set.size)) return send(res, 400, '{"error":"Not a removable upload"}');
+      // Runs in the same queue as saving the card list, so it cannot race with a save that starts using the upload.
+      const job = appWriteQueue.then(async () => {
+        const current = JSON.parse(fs.readFileSync(DB, 'utf8'));
+        const used = collectAssetRefs(current);
+        for (const kind of Object.keys(wanted)) {
+          for (const item of wanted[kind]) if (used[kind].has(item)) return { discarded: false };
+        }
+        await cleanupUnusedAssets(subject, current);
+        return { discarded: true };
+      });
+      appWriteQueue = job.catch(error => console.error('Discarding upload failed:', error.message));
+      return send(res, 200, JSON.stringify(await job));
     }
 
     if (p === '/api/upload-site' && req.method === 'POST') {
